@@ -1,0 +1,56 @@
+---
+title: "Project"
+author: "Diana Fay Arbas"
+date: "2023-06-04"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+Team 1 Final Project
+
+First we will import the dataset and describe characteristics such as dimensions, data types, file types, and import methods used.
+
+```{r}
+
+# Import dataset
+sleep <- read.csv("sleep.csv")
+head(sleep)
+
+```
+
+```{r}
+
+# Get the dimensions of the dataset
+dim(sleep)
+
+```
+
+There are 374 rows and 13 columns in the sleep dataset.
+
+
+```{r}
+
+# Display the structure of the sleep dataset
+# including variable names, their data types, and some example values
+str(sleep)
+
+```
+The target variable is sleep disorder, which is categorical. Other categorical variables are gender, and occupation. The ordinal variables are quality of sleep, stress level, and BMI category. The numerical variables are age, sleep duration, physical activity level, blood pressure, heart rate, and daily steps. 
+
+Now we will check for missing data.
+
+```{r}
+
+# Check for null values
+null_values <- is.na(sleep)
+sum(null_values)
+
+```
+
+There are no missing values in this dataset.
+
+
