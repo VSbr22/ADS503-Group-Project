@@ -53,4 +53,49 @@ sum(null_values)
 
 There are no missing values in this dataset.
 
+Let's provide measures of centrality and distribution with visualizations on the following predictors: sleep duration, quality of sleep, and heart rate. 
+
+```{r}
+
+# Sleep duration descriptive statistics
+summary(sleep$Sleep.Duration)
+
+```
+
+The mean sleep duration is 7.132, and the median sleep duration is 7.2.
+
+```{r}
+
+hist(sleep$Sleep.Duration, main = "Histogram of Sleep Duration", xlab = "Sleep Duration")
+
+```
+```{r}
+
+# Quality of sleep descriptive statistics
+summary(sleep$Quality.of.Sleep)
+
+```
+
+On a scale of 1-10, the mean quality of sleep was 7.3 and the median was 7.
+
+```{r}
+
+hist(sleep$Quality.of.Sleep, main = "Histogram of Quality of Sleep", xlab = "Quality of Sleep")
+
+```
+```{r}
+
+# Heart rate descriptive statistics
+summary(sleep$Heart.Rate)
+
+```
+
+The mean heart rate is 70.17, and the median heart rate is 70.
+
+```{r}
+
+hist(sleep$Heart.Rate, main = "Histogram of Heart Rate", xlab = "Heart Rate")
+
+```
+
 
