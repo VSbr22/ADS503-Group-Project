@@ -1,101 +1,195 @@
----
-title: "Project"
-author: "Diana Fay Arbas"
-date: "2023-06-04"
-output: pdf_document
----
-
-```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 
-```
 
-Team 1 Final Project
-
-First we will import the dataset and describe characteristics such as dimensions, data types, file types, and import methods used.
-
-```{r}
 
 # Import dataset
-sleep <- read.csv("sleep.csv")
+url <- "https://raw.githubusercontent.com/VSbr22/ADS503-Group-Project/main/sleep.csv"
+
+sleep <- read.csv(url)
 head(sleep)
 
-```
 
-```{r}
 
 # Get the dimensions of the dataset
 dim(sleep)
 
-```
 
-There are 374 rows and 13 columns in the sleep dataset.
-
-
-```{r}
 
 # Display the structure of the sleep dataset
 # including variable names, their data types, and some example values
 str(sleep)
 
-```
-The target variable is sleep disorder, which is categorical. Other categorical variables are gender, and occupation. The ordinal variables are quality of sleep, stress level, and BMI category. The numerical variables are age, sleep duration, physical activity level, blood pressure, heart rate, and daily steps. 
 
-Now we will check for missing data.
-
-```{r}
 
 # Check for null values
 null_values <- is.na(sleep)
 sum(null_values)
 
-```
 
-There are no missing values in this dataset.
-
-Let's provide measures of centrality and distribution with visualizations on the following predictors: sleep duration, quality of sleep, and heart rate. 
-
-```{r}
 
 # Sleep duration descriptive statistics
 summary(sleep$Sleep.Duration)
 
-```
 
-The mean sleep duration is 7.132, and the median sleep duration is 7.2.
-
-```{r}
 
 hist(sleep$Sleep.Duration, main = "Histogram of Sleep Duration", xlab = "Sleep Duration")
 
-```
-```{r}
 
 # Quality of sleep descriptive statistics
 summary(sleep$Quality.of.Sleep)
 
-```
 
-On a scale of 1-10, the mean quality of sleep was 7.3 and the median was 7.
-
-```{r}
 
 hist(sleep$Quality.of.Sleep, main = "Histogram of Quality of Sleep", xlab = "Quality of Sleep")
 
-```
-```{r}
 
 # Heart rate descriptive statistics
 summary(sleep$Heart.Rate)
 
-```
 
-The mean heart rate is 70.17, and the median heart rate is 70.
-
-```{r}
 
 hist(sleep$Heart.Rate, main = "Histogram of Heart Rate", xlab = "Heart Rate")
 
-```
+
+# check for class imbalance
+
+class_counts <- table(sleep$Sleep.Disorder)
+
+print(class_counts)
+
+# we have a class imbalance with the class- None being higher than both sleep apnea and insomnia.
+# we need to balance these classes. We are going to want to use stratified sampling due to the imbalance. 
+
+barplot(class_counts, main = "Sleep Disorder")
+class_prop <- prop.table(class_counts)
+print(class_prop)
+
+# conduct splitting for training and test set using stratified sampling
+library(caret)
+set.seed(13)
+
+x <- sleep[, -13]
+y <- sleep$Sleep.Disorder
+
+# perform data partition
+split_strat <- createDataPartition(y = sleep$Sleep.Disorder, p = 0.7, list = FALSE)
+
+# split into testing and training sets. 
+set.seed(13)
+x_train <- x[ split_strat,]
+y_train <- y[split_strat]
+x_test  <- x[-split_strat,]
+y_test  <- y[-split_strat]
 
 
+# drop Person.ID because it is meaningless for the dataset
+x_train$Person.ID <- NULL
+x_test$Person.ID <- NULL
+
+
+
+# create two new columns for Blood pressure 
+library(tidyverse)
+
+x_train <- x_train %>%
+  separate(Blood.Pressure, into = c("Systolic", "Diastolic"), sep = "/", convert = TRUE)
+
+x_test <- x_test %>%
+  separate(Blood.Pressure, into = c("Systolic", "Diastolic"), sep = "/", convert = TRUE)
+
+
+# make them numeric 
+
+x_train$Systolic <- as.numeric(x_train$Systolic)
+x_train$Diastolic <- as.numeric(x_train$Diastolic)
+
+x_test$Systolic <- as.numeric(x_test$Systolic)
+x_test$Diastolic <- as.numeric(x_test$Diastolic)
+
+#create dummy variables for all the categorical columns including the response variable (classes) reassign them to train_df and test_df. 
+
+dummy <- dummyVars(" ~ .", data = x_train)
+trsf <- data.frame(predict(dummy, newdata = x_train))
+
+x_train <- trsf
+
+dmy <- dummyVars(" ~ .", data = x_test)
+tran <- data.frame(predict(dmy, newdata = x_test))
+
+x_test <- tran
+
+y_train <- as.data.frame(model.matrix(~ y_train - 1))
+
+y_test <- as.data.frame(model.matrix(~ y_test - 1))
+
+
+# Preprocess the values in the data set to center and scale. No imputation needed at this time. 
+preProcValues <- preProcess(x_train,
+                            method = c("center",
+                                       "scale"))
+
+preProcValues_test <- preProcess(x_test,
+                            method = c("center",
+                                       "scale"))
+
+X_train_tran <- predict(preProcValues, x_train)
+X_test_tran <- predict(preProcValues_test, x_test)
+
+# correlations
+library(corrplot)
+
+
+correlation_matrix <- cor(X_train_tran)
+print(correlation_matrix)
+
+threshold <- 0.5 
+
+correlation_matrix_threshold <- correlation_matrix
+
+correlation_matrix_threshold[abs(correlation_matrix) < threshold] <- 0
+
+print(correlation_matrix_threshold)
+# based on the correlation matrix it is possible that sleep duration and sleep quality are going to potentially give problems. intutively they are basically the same, sleep quality should go up as sleep duration also goes up. More sleep is good. 
+
+# lets see if we have any near-zero variance 
+
+zero_var_indices <- nearZeroVar(X_train_tran)
+
+data_filtered <- X_train_tran[,-zero_var_indices]
+
+X_train <- data_filtered
+
+zero_var_indices_test <- nearZeroVar(X_test_tran)
+
+data_filtered_test <- X_test_tran[,-zero_var_indices]
+
+X_test <- data_filtered_test
+
+
+# Run PCA to see the structure of the data 
+
+library(dplyr)
+library(ggplot2)
+library(ggfortify)
+
+
+
+# Perform PCA on the predictors
+pca_result <- prcomp(X_train)
+X_train_var <- (pca_result$sdev)^2*100/sum((pca_result$sdev)^2)
+X_train_var
+
+# Plot the variance explained by each principal component
+plot(X_train_var)
+
+
+pca_x_train <- preProcess(x = X_train, method = "pca")
+pca_x_train
+### based on PCA 10 components are necessary to capture 95 percent of the variance. 
+
+
+boxplot(X_train)
+boxplot(X_test)
+
+boxplot(y_train)
+boxplot(y_test)
