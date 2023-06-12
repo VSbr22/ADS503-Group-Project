@@ -76,64 +76,60 @@ split_strat <- createDataPartition(y = sleep$Sleep.Disorder, p = 0.7, list = FAL
 
 # split into testing and training sets. 
 set.seed(13)
-x_train <- x[ split_strat,]
-y_train <- y[split_strat]
-x_test  <- x[-split_strat,]
-y_test  <- y[-split_strat]
+train <- sleep[split_strat, ]
+test <- sleep[-split_strat, ]
 
 
 # drop Person.ID because it is meaningless for the dataset
-x_train$Person.ID <- NULL
-x_test$Person.ID <- NULL
+train$Person.ID <- NULL
+test$Person.ID <- NULL
 
 
 
 # create two new columns for Blood pressure 
 library(tidyverse)
 
-x_train <- x_train %>%
+train <- train %>%
   separate(Blood.Pressure, into = c("Systolic", "Diastolic"), sep = "/", convert = TRUE)
 
-x_test <- x_test %>%
+test <- test %>%
   separate(Blood.Pressure, into = c("Systolic", "Diastolic"), sep = "/", convert = TRUE)
 
 
 # make them numeric 
 
-x_train$Systolic <- as.numeric(x_train$Systolic)
-x_train$Diastolic <- as.numeric(x_train$Diastolic)
+train$Systolic <- as.numeric(train$Systolic)
+train$Diastolic <- as.numeric(train$Diastolic)
 
-x_test$Systolic <- as.numeric(x_test$Systolic)
-x_test$Diastolic <- as.numeric(x_test$Diastolic)
+test$Systolic <- as.numeric(test$Systolic)
+test$Diastolic <- as.numeric(test$Diastolic)
 
 #create dummy variables for all the categorical columns including the response variable (classes) reassign them to train_df and test_df. 
 
-dummy <- dummyVars(" ~ .", data = x_train)
-trsf <- data.frame(predict(dummy, newdata = x_train))
+dummy <- dummyVars(" ~ .", data = train)
+trsf <- data.frame(predict(dummy, newdata = train))
 
-x_train <- trsf
+train <- trsf
 
-dmy <- dummyVars(" ~ .", data = x_test)
-tran <- data.frame(predict(dmy, newdata = x_test))
+dmy <- dummyVars(" ~ .", data = test)
+tran <- data.frame(predict(dmy, newdata = test))
 
-x_test <- tran
+test <- tran
 
-y_train <- as.data.frame(model.matrix(~ y_train - 1))
 
-y_test <- as.data.frame(model.matrix(~ y_test - 1))
 
 
 # Preprocess the values in the data set to center and scale. No imputation needed at this time. 
-preProcValues <- preProcess(x_train,
+preProcValues <- preProcess(train,
                             method = c("center",
                                        "scale"))
 
-preProcValues_test <- preProcess(x_test,
+preProcValues_test <- preProcess(test,
                             method = c("center",
                                        "scale"))
 
-X_train_tran <- predict(preProcValues, x_train)
-X_test_tran <- predict(preProcValues_test, x_test)
+X_train_tran <- predict(preProcValues, train)
+X_test_tran <- predict(preProcValues_test, test)
 
 # correlations
 library(corrplot)
