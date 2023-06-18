@@ -1,0 +1,551 @@
+---
+title: "Project"
+author: "Diana Fay Arbas"
+date: "2023-06-04"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Team 1 Final Project
+
+Load Packages, Import data set from github, View header and dimensions.
+
+```{r}
+# Load the required packages
+library(ggplot2)
+library(gridExtra)
+library(caret)
+library(tidyverse)
+library(corrplot)
+library(dplyr)
+library(ggfortify)
+library(MLmetrics) 
+library(pROC)
+
+
+# Import dataset as a csv file from GitHub
+url <- "https://raw.githubusercontent.com/VSbr22/ADS503-Group-Project/main/sleep.csv"
+sleep <- read.csv(url)
+
+# View df header and dimensions
+dim(sleep)
+head(sleep)
+
+# Display the Variable names, Data types, and Instance examples
+str(sleep)
+```
+
+Sort predictors by variable type and create two lists - one for categorical and one which combines numerical and ordinal. 
+
+```{r}
+
+# Target Variable: Sleep Disorder
+# (5)Numerical: age, sleep duration, physical activity level, heart rate, daily steps
+# (2)Ordinal: quality of sleep, stress level
+numerical_ordinal_predictors <- c("Age", "Sleep.Duration", "Physical.Activity.Level", "Heart.Rate", 
+    "Daily.Steps", "Quality.of.Sleep", "Stress.Level")
+# (5)Categorical: gender, occupation, !!!BMI category!!!, !!blood pressure(will convert to categorical)!!
+categorical_predictors <- c("Gender", "Occupation", "BMI.Category", "Blood.Pressure")
+
+```
+
+Measures of Centrality & Histogram of Distribution for Numerical Predictors.
+
+```{r}
+# Create list to store each predictors histogram. Plots are graphed after for-loop. 
+numerical_ordinal_plot_list <- list()
+
+# Create Master list
+master_plot_list <- list()
+
+# Customize Bin Width for each Predictor
+bin_width <- c(.5, .2, 5, 2, 400, .25, 1)
+
+# For each predictor, print Measures of Centrality and add Histogram to the numerical_plot_list
+for (i in 1:length(numerical_ordinal_predictors)) {
+    
+    # Print predicitor name then Measures of Centrality
+    print(numerical_ordinal_predictors[i])
+    print(summary(sleep[[numerical_ordinal_predictors[i]]]))
+    
+    # Create Histogram
+    p <- ggplot(sleep, aes_string(x= numerical_ordinal_predictors[i])) + 
+        geom_histogram(binwidth = bin_width[i] , fill = "brown", color = "black")
+    
+    # Add Histogram to List
+    numerical_ordinal_plot_list[[i]] <- p
+    master_plot_list[[i]] <- p
+}
+
+# Print all the histograms in a more aesthetic way
+grid.arrange(grobs = numerical_ordinal_plot_list, ncol = 2)
+```
+
+Check for Class Imbalance in the Categorical Predictors.
+
+```{r}
+# Create list to store each predictors histogram. Plots are graphed after for-loop. 
+categorical_plot_list <- list()
+
+# For each specified column, create a bar plot
+for (i in 1:length(categorical_predictors)) {
+    p <- ggplot(sleep, aes_string(categorical_predictors[i])) + geom_bar(fill = "blue") + theme_minimal()
+    g = i + length(numerical_ordinal_predictors)
+    categorical_plot_list[[i]] <- p
+    master_plot_list[[g]] <- p
+}
+
+# Print only the bar plots
+grid.arrange(grobs = categorical_plot_list, ncol = 2)
+
+# Print the Master Plot list with both Histograms & Bar Plots.
+#grid.arrange(grobs = master_plot_list, ncol = 2)
+```
+
+Check for Class Imbalance in the Target Variable.
+
+```{r}
+# Class Counts
+class_counts <- table(sleep$Sleep.Disorder)
+print(class_counts)
+
+# Class Percentages
+class_prop <- prop.table(class_counts)
+print(class_prop)
+
+# Class Bar chart
+barplot(class_counts, main = "Sleep Disorder Original")
+
+# There is class imbalance with the Target Variable Sleep.Disorder - None being higher than both sleep apnea and insomnia.
+# Stratified Sampling will be used to ensure equal class distribution in both testing and training sets
+```
+
+Turn Target Variable into Binary.
+
+```{r}
+Sleep.Disorder.Binary = as.character(sleep$Sleep.Disorder)
+Sleep.Disorder.Binary[Sleep.Disorder.Binary=="Insomnia" ] = "Yes"
+Sleep.Disorder.Binary[Sleep.Disorder.Binary=="Sleep Apnea" ] = "Yes"
+Sleep.Disorder.Binary[Sleep.Disorder.Binary=="None" ] = "No"
+Sleep.Disorder.Binary = factor(Sleep.Disorder.Binary, levels=c("Yes","No") )
+# sleep <- cbind(sleep, Sleep.Disorder.Binary)
+sleep <- cbind(sleep, binary_outcome = Sleep.Disorder.Binary) # Vannesa's suggestion
+
+# To Drop Columns in needed
+# sleep <- train %>% select(-Sleep.Disorder) This had an error message
+# sleep <- sleep %>% select(-Sleep.Disorder) # Diana's edit
+head(sleep)
+
+```
+
+Create Test and Train Partitions with balanced Sleep.Disorder classes.
+
+```{r}
+# Set Seed for Repetition
+set.seed(13)
+
+# Separate Dependent and Independent Variables
+x <- sleep[, -13]
+y <- sleep$Sleep.Disorder
+
+# Perform data partition
+split_strat <- createDataPartition(y = sleep$Sleep.Disorder, p = 0.7, list = FALSE)
+
+# Split into testing and training sets. Show new dimensions
+train <- sleep[split_strat, ]
+test <- sleep[-split_strat, ]
+dim(train)
+dim(test)
+
+# Check for equal class distribution of Target variable in both testing and training sets
+# Bar Plots of Sleep.Disorder class distribution for both Test and Train
+train_plot <- barplot(table(train$Sleep.Disorder), main = "Sleep Disorder Train")
+test_plot <- barplot(table(test$Sleep.Disorder), main = "Sleep Disorder Test")
+
+```
+
+Feature Transformations.
+
+```{r}
+# Drop Person.ID because it is meaningless for the dataset
+train$Person.ID <- NULL
+test$Person.ID <- NULL
+
+# Create two new columns for Blood pressure
+train <- train %>% separate(Blood.Pressure, into = c("Systolic", "Diastolic"), sep = "/", convert = TRUE)
+test <- test %>% separate(Blood.Pressure, into = c("Systolic", "Diastolic"), sep = "/", convert = TRUE)
+
+# make them numeric 
+train$Systolic <- as.numeric(train$Systolic)
+train$Diastolic <- as.numeric(train$Diastolic)
+test$Systolic <- as.numeric(test$Systolic)
+test$Diastolic <- as.numeric(test$Diastolic)
+
+```
+
+
+### Logistic Regression Model
+
+```{r}
+
+suppressWarnings({
+ 
+# Drop categorical predictors Gender, Occupation, BMI.Category, and Sleep.Disorder
+# Subset numerical predictors
+num_train <- train[, !(names(train) %in% c("Gender", "Occupation", "BMI.Category", "Sleep.Disorder"))]
+num_test <- test[, !(names(test) %in% c("Gender", "Occupation", "BMI.Category", "Sleep.Disorder"))]
+
+# Subset predictors in train and test
+num_train_X <- num_train[, !(names(num_train) %in% "binary_outcome")]
+num_test_X <- num_test[, !(names(num_test) %in% "binary_outcome")]
+# Subset target in train and test
+train_Y <- num_train$binary_outcome
+test_Y <- num_test$binary_outcome
+
+# Perform centering and scaling on numerical predictors
+num_train_scaled <- as.data.frame(scale(num_train_X))
+num_test_scaled <- as.data.frame(scale(num_test_X))
+
+# Build logistic regression model
+ctrl <- trainControl(method = "cv",
+                     summaryFunction = multiClassSummary,
+                     classProbs = TRUE,
+                     savePredictions = TRUE)
+
+set.seed(100)
+
+lrFit <- train(x = num_train_scaled, 
+               y = train_Y,
+               method = "glm",
+               metric = "ROC",
+               trControl = ctrl)
+
+lrFit$finalModel
+
+})
+
+```
+```{r}
+
+lrCM <- confusionMatrix(lrFit, none = "none")
+lrCM
+
+```
+The logistic regression model has an accuracy of 94.7%. 
+
+```{r}
+
+# Plot the ROC curve for the hold-out set
+lrRoc <- roc(response = lrFit$pred$obs,
+             predictor = lrFit$pred$Yes,
+             levels = rev(levels(lrFit$pred$obs)))
+
+plot(lrRoc, legacy.axes = TRUE)
+
+```
+
+```{r}
+
+lrRoc$auc
+
+```
+
+The area under the curve is 0.952.
+
+Here are the important variables.
+
+```{r}
+
+lrImp <- varImp(lrFit, scale = FALSE)
+plot(lrImp)
+
+```
+
+```{r}
+
+# Store results for model comparison later
+testResults <- data.frame(obs = test_Y, 
+                          LR = predict(lrFit, num_test_scaled))
+
+```
+
+### Linear Discriminant Analysis Model
+
+```{r}
+
+suppressWarnings({
+  
+set.seed(100)
+ldaFit <- train(x = num_train_scaled,
+                y = train_Y,
+                method = "lda",
+                preProc = c("center", "scale"),
+                metric = "ROC",
+                trControl = ctrl)
+
+ldaFit$finalModel
+
+})
+                
+```
+
+```{r}
+
+ldaCM <- confusionMatrix(ldaFit, norm = "none")
+ldaCM
+
+```
+The accuracy of the LDA model is 93.5%. 
+
+```{r}
+
+# Plot the ROC curve for the hold-out set
+ldaRoc <- roc(response = ldaFit$pred$obs,
+              predictor = ldaFit$pred$Yes,
+              levels = rev(levels(ldaFit$pred$obs)))
+
+plot(ldaRoc, legacy.axes = TRUE)
+
+```
+
+```{r}
+
+ldaRoc$auc
+
+```
+
+The area under the curve is 0.943.
+
+
+```{r}
+
+plot(varImp(ldaFit, scale = FALSE))
+
+```
+
+```{r}
+
+# Storing predictions in testResults for later
+testResults$LDA <- predict(ldaFit, num_test_scaled)
+
+```
+
+### Nearest Shrunken Centroids Model
+
+```{r}
+
+glmnGrid <- expand.grid(alpha = c(0, .1, .2, .4, .6, .8, 1),
+                        lambda = seq(0.1, .2, length = 10))
+
+set.seed(100)
+glmnFit <- train(x = num_train_scaled,
+                 y = train_Y,
+                 method = "glmnet",
+                 tuneGrid = glmnGrid,
+                 preProc = c("center", "scale"),
+                 metric = "ROC",
+                 trControl = ctrl)
+
+glmnFit$results
+
+```
+
+```{r}
+
+plot(glmnFit$finalModel, label = TRUE)
+coef(glmnFit$finalModel, s = 100)
+coef(glmnFit$finalModel, s = 0.001)
+glmnFit$finalModel$lambda
+glmnFit$finalModel$tuneValue
+glmnFit$finalModel$lambdaOpt
+coef(glmnFit$finalModel, s = glmnFit$finalModel$lambdaOpt)
+
+```
+
+```{r}
+
+glmnnetCM <- confusionMatrix(glmnFit, norm = "none")
+glmnnetCM
+
+```
+The accuracy of the nearest shrunken centroids model is 95.1%.
+
+```{r}
+
+# Plot the ROC curve for the hold-out set
+glmRoc <- roc(response = glmnFit$pred$obs,
+              predictor = glmnFit$pred$Yes,
+              levels = rev(levels(glmnFit$pred$obs)))
+
+plot(glmRoc, legacy.axes = TRUE)
+
+```
+
+```{r}
+
+glmRoc$auc
+
+```
+
+The nearest shrunken centroids model's AUC is 0.960.
+
+```{r}
+
+# Most important variables
+plot(varImp(glmnFit, scale = FALSE))
+
+```
+
+
+```{r}
+
+# Store model predictions for later
+testResults$glmnet <- predict(glmnFit, num_test_scaled)
+
+```
+
+
+Binning Predictors.
+
+```{r}
+# If your data follows a certain distribution, choose a discretization method that aligns with that distribution.
+# Categorizing a cont outcome can have detrimental impacts on model performance especially when the distribution does not have distinct groupings.
+
+# Perform K-means Disrimitization on the Systolic variable
+# Fit the k-means to the training data and then apply the same binning to the test data.
+km_res <- kmeans(train$Systolic, centers = 3)
+
+# Add the result to your data frame as a new column
+train <- train %>% mutate(Systolic_New = km_res$cluster)
+# test <- test %>% mutate(Systolic_New = km_res$cluster)
+
+# Remove the 'Systolic' column
+train <- train %>% select(-Systolic)
+# test <- test %>% select(-Systolic)
+
+# Print the updated dataframe
+head(train)
+
+```
+
+
+Create dummy variables for the 3 Categorical Predictors: Gender, Occupation, BMI.Category & the Target Variable: Sleep.Disorder
+
+```{r}
+# Training Set 
+dummy <- dummyVars(" ~ .", data = train)
+trsf <- data.frame(predict(dummy, newdata = train))
+train <- trsf
+
+# Test Set
+dmy <- dummyVars(" ~ .", data = test)
+tran <- data.frame(predict(dmy, newdata = test))
+test <- tran
+
+# Training and test sets end up with different numbers of columns after creating dummy variables.
+# There are categorical variables that have unique values which are are not represented in both sets 
+# The training set has three categories that do not appear in the test set. 
+# 'OccupationManager', 'OccupationSales.Representative', 'BMI.CategoryObese'
+print(ncol(train) - ncol(test))
+
+# Find columns in train but not in test
+missing_cols <- setdiff(names(train), names(test))
+missing_cols
+
+# Add missing columns to test and fill in all rows with 0
+for (col in missing_cols){
+  test[[col]] <- 0
+}
+
+# Rearrange columns in test to match train
+test <- test[, names(train)]
+
+# Make sure there are equal columns
+print(ncol(train) - ncol(test))
+
+# Make sure they are in the same order
+head(train, n=3)
+head(test, n=3)
+```
+
+Preprocessing: Center and Scale the values in both Training and Test sets to prepare for modeling. 
+
+```{r}
+# Test
+preProcValues <- preProcess(train, method = c("center", "scale"))
+X_train_tran <- predict(preProcValues, train)
+
+# Train
+preProcValues_test <- preProcess(test, method = c("center", "scale"))
+X_test_tran <- predict(preProcValues_test, test)
+```
+
+Check for Multicollinearity.
+
+```{r}
+# Correlation matrix
+correlation_matrix <- cor(X_train_tran)
+#print(correlation_matrix)
+
+# Correlation matrix with Threshold
+threshold <- 0.5 
+correlation_matrix_threshold <- correlation_matrix
+correlation_matrix_threshold[abs(correlation_matrix) < threshold] <- 0
+print(correlation_matrix_threshold)
+
+# Based on the correlation matrix it is possible that sleep duration and sleep quality are going to potentially give problems. 
+# Intuitively they are basically the same, sleep quality should go up as sleep duration also goes up. 
+# More sleep is good.
+```
+
+Feature Reduction: Remove Near-zero Variance Predictors.
+
+```{r}
+# Find all Zero Variance Predictors in the Training Set 
+zero_var_indices <- nearZeroVar(X_train_tran)
+zv <- names(X_train_tran)[zero_var_indices]
+print("Zero Variance Training Predictors:")
+print(zv)
+
+# Remove these Predictors from Training and Testing
+# Remove the same zero-variance predictors in the test set from both the testing and training sets
+# (5)Features total
+X_train <- X_train_tran[,-zero_var_indices]
+X_test <- X_test_tran[,-zero_var_indices]
+```
+
+Feature Reduction: Run PCA on training set.
+
+```{r}
+# Run PCA on training set
+pca_train <- prcomp(X_train)
+X_train_var <- (pca_train$sdev)^2*100/sum((pca_train$sdev)^2)
+X_train_var
+
+# Plot the variance explained by each principal component
+plot(X_train_var)
+
+# Apply the transformation to both the training and test sets
+pca_train_data <- predict(pca_train, newdata = train)
+pca_test_data <- predict(pca_train, newdata = test)
+
+# Plot Predictors
+#boxplot(X_train)
+#boxplot(X_test)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
