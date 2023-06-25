@@ -75,18 +75,21 @@ The purpose of this project is to present the process used to determine the best
 * The class imbalance of the response variable was corrected using stratified sampling. The response variable was also changed to a binary variable of either having a sleep disorder (1) or not (0). 
 * Irrelevant and redundant predictors were dropped from the dataset specifically the duplicate column of Sleep Disorder, and Person ID.
 Test/Training set was created with a more balanced response variable being depicted in both sets. 
-* Blood pressure column was split into two columns one for Systolic, and Diastolic numbers corresponding to the readings of a blood pressure screening. They were then transformed to numeric values. 
+* Blood pressure column was split into two columns one for Systolic, and Diastolic numbers corresponding to the readings of a blood pressure screening. They were then transformed to numeric values.
+* Blood Pressures were binned using thresholds for low, normal, high blood pressure. Original columns removed after. 
 * Dummy variables were created for the categorical predictors Occupation and BMI Category.  Resulting in more attributes for the dataset to encompass a variety of employments and BMI types. 
 * Near-zero variance predictors were removed for feature reduction. 
 * Check for multicollinearity using a correlation matrix.  Depending on the model some features will be removed due to high correlation, and some will be kept. 
 * Gender is transformed from Male/Female to 0/1. 
-* Center & Scaling of predictor variables to get the distribution to normal like. 
+* Center & Scaling of predictor variables to get the distribution to normal like.
+* Replace response variable in BMI category to combine two duplicate response. (Normal Weight and Normal combined)
 
 
 ## Exploratory Data Analysis
 * Verified dimenstion and summary of the dataset
 * verified no missing values
 * verified there is an imbalance in the response variable
+* Verified a duplicate response type in BMI category
 * Various data types, numerical, ordinal, categorical.
 
 
