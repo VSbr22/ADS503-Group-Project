@@ -1,0 +1,971 @@
+---
+title: "Sleep Disorder Study"
+author: "V. Salazar, D.Arbas, J. Day"
+date: "2023-06-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Load the following packages
+
+```{r}
+# Load the required packages
+library(ggplot2)
+library(gridExtra)
+library(caret)
+library(tidyverse)
+library(corrplot)
+library(dplyr)
+library(ggfortify)
+library(pROC)
+library(MLmetrics)
+
+
+# Import dataset as a csv file from GitHub
+url <- "https://raw.githubusercontent.com/VSbr22/ADS503-Group-Project/main/sleep.csv"
+sleep <- read.csv(url)
+```
+
+### EDA
+
+```{r}
+# View df header and dimensions
+dim(sleep)
+head(sleep)
+
+# Display the Variable names, Data types, and Instance examples
+str(sleep)
+```
+
+```{r}
+# Target Variable: Sleep Disorder
+
+# (5)Numerical: age, sleep duration, physical activity level, heart rate, daily steps
+# (2)Ordinal: quality of sleep, stress level
+numerical_ordinal_predictors <- c("Age", "Sleep.Duration", "Physical.Activity.Level", "Heart.Rate", 
+    "Daily.Steps", "Quality.of.Sleep", "Stress.Level")
+# (5)Categorical: gender, occupation, !!!BMI category!!!, !!blood pressure(will convert to catgorical)!!
+categorical_predictors <- c("Gender", "Occupation", "BMI.Category", "Blood.Pressure")
+```
+
+```{r}
+# Measures of Centrality & Histogram of Distribution for Numerical Predictors
+
+# Create list to store each predictors histogram. Plots are graphed after for-loop. 
+numerical_ordinal_plot_list <- list()
+
+# Create Master list
+master_plot_list <- list()
+
+# Customize Bin Width for each Predictor
+bin_width <- c(.5, .2, 5, 2, 400, .25, 1)
+
+# For each predictor, print Measures of Centrality and add Histogram to the numerical_plot_list
+for (i in 1:length(numerical_ordinal_predictors)) {
+    
+    # Print predicitor name then Measures of Centrality
+    print(numerical_ordinal_predictors[i])
+    print(summary(sleep[[numerical_ordinal_predictors[i]]]))
+    
+    # Create Histogram
+    p <- ggplot(sleep, aes_string(x= numerical_ordinal_predictors[i])) + 
+        geom_histogram(binwidth = bin_width[i] , fill = "brown", color = "black")
+    
+    # Add Historgram to List
+    numerical_ordinal_plot_list[[i]] <- p
+    master_plot_list[[i]] <- p
+}
+
+# Print all the histgrams in a more aesthetic way
+grid.arrange(grobs = numerical_ordinal_plot_list, ncol = 2)
+```
+
+```{r}
+# Check for Class Imbalance in the Categorical Predictors
+
+# Create list to store each predictors histogram. Plots are graphed after for-loop. 
+categorical_plot_list <- list()
+
+# For each specified column, create a bar plot
+for (i in 1:length(categorical_predictors)) {
+    p <- ggplot(sleep, aes_string(categorical_predictors[i])) + geom_bar(fill = "blue") + theme_minimal()
+    g = i + length(numerical_ordinal_predictors)
+    categorical_plot_list[[i]] <- p
+    master_plot_list[[g]] <- p
+}
+
+# Print only the barplots
+grid.arrange(grobs = categorical_plot_list, ncol = 2)
+
+# Print the Master Plot list with both Histograms & Bar Plots.
+#grid.arrange(grobs = master_plot_list, ncol = 2)
+```
+
+```{r}
+# Check for Class Imbalance in the Target Variable 
+
+# Class Counts
+class_counts <- table(sleep$Sleep.Disorder)
+print(class_counts)
+
+# Class Percentages
+class_prop <- prop.table(class_counts)
+print(class_prop)
+
+# Class Barchart
+barplot(class_counts, main = "Sleep Disorder Origonal")
+
+# check the BMI responses as well
+class_countsbmi <- table(sleep$BMI.Category)
+print(class_countsbmi)
+
+# drop the weight in normal weight so that normal does not have two separate columns. 
+sleep$BMI.Category[sleep$BMI.Category == 'Normal Weight'] <- 'Normal'
+
+print(sleep$BMI.Category)
+
+class_countsbmi <- table(sleep$BMI.Category)
+print(class_countsbmi)
+
+# There is class imbalance with the Target Varibale Sleep.Disorder - None being higher than both sleep apnea and insomnia.
+# Stratified Sampling will be used to ensure equal class ditrobution in both testing and training sets
+```
+
+```{r}
+# Turn Target Variable into Binary
+
+Sleep.Disorder.Binary = as.character(sleep$Sleep.Disorder)
+Sleep.Disorder.Binary[Sleep.Disorder.Binary=="Insomnia" ] = "Yes"
+Sleep.Disorder.Binary[Sleep.Disorder.Binary=="Sleep Apnea" ] = "Yes"
+Sleep.Disorder.Binary[Sleep.Disorder.Binary=="None" ] = "No"
+Sleep.Disorder.Binary = factor(Sleep.Disorder.Binary, levels=c("Yes","No") )
+sleep <- cbind(sleep, Sleep.Disorder.Binary)
+
+head(sleep)
+```
+
+```{r}
+# To Drop Columns in needed
+sleep <- sleep %>% select(-Sleep.Disorder)
+#head(sleep, n=3)
+```
+
+### Data Pre-Processing / Data Splitting
+
+```{r}
+# Create Test and Train Partitions with balanced Sleep.Disorder classes
+
+# Set Seed for Repitition
+set.seed(13)
+
+# Perform data partition
+split_strat <- createDataPartition(y = sleep$Sleep.Disorder, p = 0.7, list = FALSE)
+
+# Split into testing and training sets. Show new dimensions
+train <- sleep[split_strat, ]
+test <- sleep[-split_strat, ]
+dim(train)
+dim(test)
+
+# Check for equal class ditrobution of Target variable in both testing and training sets
+# Bar Plots of Sleep.Disorder class distrobution for both Test and Train
+train_plot <- barplot(table(train$Sleep.Disorder), main = "Sleep Disorder Train")
+test_plot <- barplot(table(test$Sleep.Disorder), main = "Sleep Disorder Test")
+```
+
+```{r}
+binBloodPressure <- function(Blood.Pressure) {
+  Blood.Pressure <- strsplit(Blood.Pressure, "/")[[1]]
+  systolic <- as.numeric(Blood.Pressure[1])
+  diastolic <- as.numeric(Blood.Pressure[2])
+  
+  if (systolic <= 90 && diastolic <= 60) {
+    return("Low")
+  } else if (systolic > 140 || diastolic > 90) {
+    return("High")
+  } else {
+    return("Normal")
+  }
+}
+
+# Apply binning to data
+train$bp.bin <- sapply(train$Blood.Pressure, binBloodPressure)
+
+```
+
+```{r}
+binBloodPressure <- function(Blood.Pressure) {
+  Blood.Pressure <- strsplit(Blood.Pressure, "/")[[1]]
+  systolic <- as.numeric(Blood.Pressure[1])
+  diastolic <- as.numeric(Blood.Pressure[2])
+  
+  if (systolic <= 90 && diastolic <= 60) {
+    return("Low")
+  } else if (systolic > 140 || diastolic > 90) {
+    return("High")
+  } else {
+    return("Normal")
+  }
+}
+
+# Apply binning to data
+test$bp.bin <- sapply(test$Blood.Pressure, binBloodPressure)
+```
+
+```{r}
+# Feature Transformations
+
+# Drop Person.ID because it is meaningless for the dataset
+train$Person.ID <- NULL
+test$Person.ID <- NULL
+
+# Drop Blood.Pressure now that we have the bins. 
+train$Blood.Pressure <- NULL
+test$Blood.Pressure <- NULL 
+
+
+
+# Create two new columns for Blood pressure
+#train <- train %>% separate(Blood.Pressure, into = c("Systolic", "Diastolic"), sep = "/", convert = TRUE)
+#test <- test %>% separate(Blood.Pressure, into = c("Systolic", "Diastolic"), sep = "/", convert = TRUE)
+
+# make them numeric 
+#train$Systolic <- as.numeric(train$Systolic)
+#train$Diastolic <- as.numeric(train$Diastolic)
+#test$Systolic <- as.numeric(test$Systolic)
+#test$Diastolic <- as.numeric(test$Diastolic)
+```
+
+### Data Pre-Processing \~ Dummy Variables
+
+```{r}
+# Create dummy variables for the 3 Categorical Predictors:  Occupation, BMI.Category & the Target Variable: Sleep.Disorder
+
+# Training Set
+
+dummy <- dummyVars( ~ Occupation + BMI.Category + bp.bin , data = train)
+trsf <- data.frame(predict(dummy, newdata = train))
+train <- cbind(train, trsf)
+train$Occupation <- NULL 
+train$BMI.Category <- NULL
+train$bp.bin <- NULL
+
+# Test Set
+dummy1 <- dummyVars( ~ Occupation + BMI.Category + bp.bin, data = test)
+trsf1 <- data.frame(predict(dummy1, newdata = test))
+test <- cbind(test, trsf1)
+test$Occupation <- NULL 
+test$BMI.Category <- NULL
+test$bp.bin <- NULL
+
+
+# Training and test sets end up with different numbers of columns after creating dummy variables.
+# There are categorical variables that have unique values which are are not represented in both sets 
+# The training set has three categories that do not appear in the test set. 
+# 'OccupationManager', 'OccupationSales.Representative', 'BMI.CategoryObese'
+print(ncol(train) - ncol(test))
+
+# Find columns in train but not in test
+missing_cols <- setdiff(names(train), names(test))
+missing_cols
+
+# Add missing columns to test and fill in all rows with 0
+for (col in missing_cols){
+  test[[col]] <- 0
+}
+
+# Rearrange columns in test to match train
+test <- test[, names(train)]
+
+# Make sure there are equal columns
+print(ncol(train) - ncol(test))
+
+# Make sure they are in the same order
+head(train, n=3)
+head(test, n=3)
+```
+
+#### Feature Selection/ Removal of near-zero variance
+
+```{r}
+# Feature Reduction
+# Remove Near-zero Variance Predicors
+
+# Find all Zero Varience Predicitors in the Training Set 
+zero_var_indices <- nearZeroVar(train)
+zv <- names(train)[zero_var_indices]
+print("Zero Varience Training Predicitors:")
+print(zv)
+
+# Remove these Predictors from Training and Testing
+# Remove the same zero-varience predictors in the test set from both the testing and training sets
+# (5)Features total
+X_train <- train[,-zero_var_indices]
+X_test <- test[,-zero_var_indices]
+
+```
+
+### Data pre-processing center/scale
+
+```{r}
+# Preprocessing
+# Center and Scale the values in both Training and Test sets to prepare for modeling. 
+set.seed(13)
+
+
+# Test
+preProcValues <- preProcess(X_train, method = c("center", "scale"))
+trainpr <- predict(preProcValues, X_train)
+
+
+# Train
+preProcValues_test <- preProcess(X_test, method = c("center", "scale"))
+testpr <- predict(preProcValues_test, X_test)
+
+```
+
+#### Review for Multicollinearity
+
+```{r}
+# Check for Multicollinearity
+
+trainpr_corr <- trainpr
+trainpr_corr$Sleep.Disorder.Binary <- ifelse(trainpr_corr$Sleep.Disorder.Binary == "Yes", 0, 1)
+trainpr_corr$Gender <- ifelse(train$Gender == "Male", 0, 1)
+
+
+# Correlation matrix
+correlation_matrix <- cor(trainpr_corr)
+
+# Correlation matrix with Threshold
+highly_correlated_vars <- findCorrelation(correlation_matrix, cutoff = 0.8)
+
+data_filtered <- trainpr_corr[, -highly_correlated_vars]
+
+
+# Identify highly correlated variables (excluding self-correlations)
+cutoff <- 0.8
+highly_correlated_vars <- which(abs(correlation_matrix) > cutoff & upper.tri(correlation_matrix), arr.ind = TRUE)
+
+# Get the unique variables to remove
+vars_to_remove <- unique(c(highly_correlated_vars[, "row"], highly_correlated_vars[, "col"]))
+
+vars_to_remove
+
+# Remove the variables from the dataset as needed for individual dataset use the code below if needed. 
+# data_filtered <- data[, -vars_to_remove]
+
+```
+
+#### Change gender from Male/female to 0/1
+
+```{r}
+trainpr$Gender <- ifelse(train$Gender == "Male", 0, 1)
+testpr$Gender <- ifelse(test$Gender == "Male", 0, 1)
+```
+
+```{r}
+# our training values that everyone will build off of is trainpr and testpr
+```
+
+### Modeling
+
+```{r}
+### for vannesa model only 
+vs.train <- trainpr
+vs.test <- testpr
+
+```
+
+```{r}
+#col_index1 <- 3
+#col_index2 <- 4
+#col_index3 <- 6
+#c(col_index1, col_index2, col_index3)
+
+# remove highly correlated predictors
+
+vs.train <- vs.train[, -c(3:4, 6, 14, 17, 20)]
+vs.test <- vs.test[, -c(3:4, 6, 14, 17, 20)]
+
+
+
+# Based on the correlation matrix it is possible that sleep duration and sleep quality are going to potentially give problems. 
+# Intutively they are basically the same, sleep quality should go up as sleep duration also goes up. 
+# More sleep is good.
+
+# daily steps removed because its redundant with physical activity level
+# removing quality of sleep because it is highly correlated with stress level. 
+```
+
+### VSModeling
+
+```{r}
+# penalized logistic regression model 
+library(glmnet)
+set.seed(13)
+
+vs.train$Sleep.Disorder.Binary <- as.factor(vs.train$Sleep.Disorder.Binary)
+
+levels(vs.test$Sleep.Disorder.Binary) <- make.names(levels(vs.test$Sleep.Disorder.Binary), unique = TRUE)
+levels(vs.train$Sleep.Disorder.Binary) <- make.names(levels(vs.train$Sleep.Disorder.Binary), unique = TRUE)
+
+
+
+set.seed(100)
+glmnGrid <- expand.grid(alpha = c(0,  .1,  .2, .4, .6, .8, 1),
+                        lambda = seq(.01, .2, length = 10))
+
+
+ctrl <- trainControl(method = "cv",
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE,
+                     savePredictions = TRUE)
+
+glmnFit <- train(x = vs.train[, 1:5, 7:14], 
+                 y = vs.train$Sleep.Disorder.Binary,
+                 method = "glmnet",
+                 tuneGrid = glmnGrid,
+                 preProc = c("center", "scale"),
+                 metric = "ROC",
+                 trControl = ctrl)
+glmnFit
+glmnFit$results
+plot(glmnFit$finalModel, label = TRUE)
+coef(glmnFit$finalModel, s = 100)
+coef(glmnFit$finalModel, s = 0.001)
+glmnFit$finalModel$lambda
+glmnFit$finalModel$tuneValue
+glmnFit$finalModel$lambdaOpt
+coef(glmnFit$finalModel, s = glmnFit$finalModel$lambdaOpt)
+
+glmnetCM <- confusionMatrix(glmnFit, norm = "none")
+glmnetCM
+
+## Plot the ROC curve for the hold-out set
+glmRoc <- roc(response = glmnFit$pred$obs,
+             predictor = glmnFit$pred$Yes,
+             levels = rev(levels(glmnFit$pred$obs)))
+
+plot(glmRoc, legacy.axes = TRUE)
+```
+
+```{r}
+testResults <- data.frame(obs = vs.test$Sleep.Disorder.Binary, 
+                          PGLM = predict(glmnFit, vs.test[, 1:5, 7:14]))
+
+```
+
+#### Penalized GLM resulted in an accuracy of 70.27% sensitivity of 0.5217, and specificity of 0.8308
+
+```{r}
+#Neural Networks 
+set.seed(13)
+
+nnetGrid <- expand.grid(size=1:3, decay=c(0,0.1,0.2,0.3,0.4,0.5,1,2))
+
+nnetFit <- train(x = vs.train[, 1:5, 7:14], 
+                 y = vs.train$Sleep.Disorder.Binary,
+                method = "nnet",
+                tuneGrid = nnetGrid,
+                metric = "ROC",
+                trace = FALSE, 
+                maxit = 2000, 
+                trControl = ctrl)
+nnetFit
+nnetFit$finalModel
+
+nnetCM <- confusionMatrix(nnetFit, norm = "none")
+nnetCM
+
+
+## Plot the ROC curve for the hold-out set
+nnetRoc <- roc(response = nnetFit$pred$obs,
+              predictor = nnetFit$pred$Yes,
+              levels = rev(levels(nnetFit$pred$obs)))
+
+plot(nnetRoc, legacy.axes = TRUE)
+nnetRoc$auc
+
+nnetImp <- varImp(nnetFit, scale = FALSE)
+plot(nnetImp)
+```
+
+```{r}
+testResults$NNET <- predict(nnetFit, vs.test[, 1:5, 7:14])
+
+```
+
+#### Neural Network Model Accuracy is 82.88%, with a sensitivty of 0.6957, and specificity of 0.9231.
+
+```{r}
+# Gradient Boosting Machine
+
+gbmGrid <- expand.grid(interaction.depth = c(1, 3, 5, 7, 9),
+                       n.trees = (1:20)*100,
+                       shrinkage = c(.01, .1),
+                       n.minobsinnode = 5)
+
+
+set.seed(13)
+
+gbmFit <- train(x = vs.train[, 1:5, 7:14], 
+                 y = vs.train$Sleep.Disorder.Binary,
+                method = "gbm",
+                tuneGrid = gbmGrid,
+                verbose = FALSE,
+                metric = "ROC",
+                trControl = ctrl)
+gbmFit
+gbmFit$finalModel
+
+gbmCM <- confusionMatrix(gbmFit, norm = "none")
+gbmCM
+
+
+## Plot the ROC curve for the hold-out set
+gbmRoc <- roc(response = gbmFit$pred$obs,
+              predictor = gbmFit$pred$Yes,
+              levels = rev(levels(gbmFit$pred$obs)))
+
+plot(gbmRoc, legacy.axes = TRUE)
+gbmRoc$auc
+
+library(gbm)
+
+gbmImp <- varImp(gbmFit, scale = FALSE)
+plot(gbmImp)
+
+
+```
+
+```{r}
+testResults$gbm <- predict(gbmFit, vs.test[, 1:5, 7:14])
+```
+
+#### Gradient Boost Machine Model had an accuracy of 88.29%, with sensitivity of 0.8478, and specificity of 0.9077
+
+### Joel Modeling
+
+```{r}
+# Define the target variable and set as factor. Isolate the target variable for testing later
+
+trainJD <- trainpr
+testJD <- testpr
+
+trainJD <- trainJD[, -c(3:4, 6, 14, 17, 20)]
+testJD <- testJD[, -c(3:4, 6, 14, 17, 20)]
+
+trainJD[["Gender"]] <- as.factor(trainJD[["Gender"]])
+testJD[["Gender"]] <- as.factor(testJD[["Gender"]])
+```
+
+#### Random Forest - 89.19% accuracy, with a sensitivity of 0.8478, and specificity of 0.9231
+
+#### It's an ensemble method therefor the final prediction is the average of a handful of unique smaller models. This is achieved by breaking the data into unique subsections and training a decision tree model on each of these unique subsections - train model on 2 random features and 10 random instances, then train model on 4 random features and 3 random instances, and so forth using other resampling techniques. The final prediction is the ensemble of all the individual guesses; use mean if the target variable is continuous or use mode if the target variable is categorical.
+
+#### Hyperparameters: \# of trees, \# of predictors considered at each split, and tree depth.
+
+#### Scalability: It can handle moderate-sized datasets and scales well with the number of trees.
+
+#### Data Structure: data frame
+
+#### Target Variable Type: convert to factor
+
+```{r}
+set.seed(13)
+library(randomForest)
+
+# Random Forest
+
+mtryValues <- 4
+
+rfFit <- train(x = trainJD[, 1:5, 7:14], 
+                y = trainJD$Sleep.Disorder.Binary,
+                method = "rf",
+                ntree = 100,
+                tuneGrid = data.frame(mtry = mtryValues),
+                metric = "ROC",
+                trControl = ctrl)
+rfFit
+rfFit$finalModel
+
+rfCM <- confusionMatrix(rfFit, norm = "none")
+rfCM
+
+
+## Plot the ROC curve for the hold-out set
+rfRoc <- roc(response = rfFit$pred$obs,
+              predictor = rfFit$pred$Yes,
+              levels = rev(levels(rfFit$pred$obs)))
+
+plot(rfRoc, legacy.axes = TRUE)
+rfRoc$auc
+
+rfImp <- varImp(rfFit, scale = FALSE)
+plot(rfImp)
+
+testResults$rf <- predict(rfFit, testJD[, 1:5, 7:14])
+
+```
+
+
+#### Bagged ADA Boost - 89.19%, sensitivity of 0.9130, and specificity of 0.8769.
+
+#### An ensemble method which aggregates the predictions of models which are iteratively improved therough a technique called boosting. At each iteration in the training process, the instances that were falsely classified are given more weight. In consequence (or as a reward in this case), the hardest instances to predict will have greater effect on the model's decisions. The final prediction is the most voted on class.
+
+#### Hyperparameters: learning rate, \# of trees, tree depth, and regularization parameters.
+
+#### Scalability: It can handle moderate-sized datasets efficiently. Can be computationally intensive, especially when \# of iterations (boosting rounds) is high.
+
+#### Data Structure: data frame
+
+#### Target Variable Type: convert to factor
+
+```{r}
+set.seed(13)
+library(adabag)
+
+
+# Bagged AdaBoost
+bag_model <- boosting(Sleep.Disorder.Binary ~ ., data = trainJD, boos=TRUE)
+
+
+# Predict using Bagged AdaBoost model
+bag_pred <- predict(bag_model, newdata = testJD[,-6])$class
+
+#Calculate model statistics for Bagged AdaBoost
+bag_pred <- factor(bag_pred)
+bag_cm <- confusionMatrix(bag_pred, testJD$Sleep.Disorder.Binary)
+bag_cm
+
+
+#Plot the ROC curve for the hold out set
+bagROC <- roc(as.numeric(testJD$Sleep.Disorder.Binary) - 1, as.numeric(bag_pred) - 1)
+plot(bagROC, main = "ROC Curve", print.auc = TRUE, col = "blue")
+
+testResults$adaBAG <- as.factor(predict(bag_model, newdata = testJD[,-6])$class)
+
+```
+
+
+#### XGBoost - Accuracy 86.49%, sensitivity 0.8043, specificity 0.9077
+
+#### Also an emsemble method that works by using gradient descent to minimize a selected loss function. The loss function uses both calssification error from each individaul tree(like AdaBoost), BUT also considers the complexity of the overall model (number of trees, size of the trees). Additionally, it automatically handles the following: outliers(L1 and L2 regularization which is lasso and ridge respectively) and implements cross-validation at each iteration.
+
+#### Hyperparameters: \# of iterations (boosting rounds) and the learning rate.
+
+#### Scalability: It can handle large datasets and is optimized for both training and prediction speed.
+
+#### Data Structure: data frame with target variable removed
+
+#### Target Variable Type: binary vector
+
+```{r}
+set.seed(13)
+library(xgboost)
+trainJD$Gender <- as.numeric(trainJD$Gender)
+testJD$Gender <- as.numeric(testJD$Gender)
+
+trainJD$Sleep.Disorder.Binary <- ifelse(trainJD$Sleep.Disorder.Binary == "Yes", 1, 0)
+trainJD$Sleep.Disorder.Binary <- factor(trainJD$Sleep.Disorder.Binary)
+
+testJD$Sleep.Disorder.Binary <- ifelse(testJD$Sleep.Disorder.Binary == "Yes", 1, 0)
+testJD$Sleep.Disorder.Binary <- factor(testJD$Sleep.Disorder.Binary)
+
+# Convert the data into xgb.DMatrix
+
+dtrain <- xgb.DMatrix(data = as.matrix(trainJD[, -6]), label = as.matrix(trainJD[, 6]))
+
+# Set parameters
+params <- list(objective = "binary:logistic",eta = 0.3,max_depth = 6,eval_metric = "error")
+
+# Train the model
+xg_model <- xgb.train(params = params,data = dtrain, nrounds = 50)
+
+# Create DMatrix for test data
+dtest <- xgb.DMatrix(data = as.matrix(testJD[, -6]), label = as.matrix(testJD[, 6]))
+
+# Make predictions
+xg_pred <- predict(xg_model, newdata = dtest)
+
+# Apply rounding function
+xg_pred <- ifelse(xg_pred >= 0.5, 1, 0)
+xg_pred <- factor(xg_pred)
+
+xg_pred
+
+
+#Calculate model statistics for Bagged AdaBoost
+xg_cm <- confusionMatrix(xg_pred, testJD$Sleep.Disorder.Binary)
+xg_cm
+
+levels(xg_pred) <- c("No", "Yes")
+
+testResults$xg <- xg_pred
+
+# plot the ROC curve on the hold-out set 
+xg_probs <- predict(xg_model, newdata = dtest, type = "prob")
+pos_probs <- xg_probs
+
+xgBoostROC <- roc(testJD$Sleep.Disorder.Binary, pos_probs)
+plot(xgBoostROC, main = "ROC Curve", xlab = "1- specificity", ylab = "Sensitivity")
+
+auc_xgBoost <- auc(xgBoostROC)
+auc_xgBoost
+```
+
+
+
+#### Diana's models
+
+Sleep.Duration and Quality.of.Sleep, Sleep.Duration and Stress.Level, and Quality.of.Sleep and Stress.Level are highly correlated pairs. So I will drop Quality.of.Sleep and Stress.Level, which seem more subjective than Sleep.Duration.
+
+```{r}
+# Drop Quality.of.Sleep and Stress.Level
+trainDA <- trainpr
+testDA <- testpr
+
+trainDA <- trainDA[, -c(3:4, 6, 14, 17, 20)]
+testDA <- testDA[, -c(3:4, 6, 14, 17, 20)]
+
+#trainDA <- trainDA[, !(colnames(trainDA) %in% c("Quality.of.Sleep", "Stress.Level"))]
+#testDA <- testDA[, !(colnames(testDA) %in% c("Quality.of.Sleep", "Stress.Level"))]
+
+```
+
+```{r}
+# Logistic Regression Model
+suppressWarnings({
+
+ctrlDA <- trainControl(method = "cv",
+                     summaryFunction = multiClassSummary,
+                     classProbs = TRUE,
+                     savePredictions = TRUE)
+
+set.seed(13)
+
+lrFit <- train(x = trainDA[,1:5, 7:14], 
+               y = trainDA$Sleep.Disorder.Binary,
+               method = "glm",
+               metric = "ROC",
+               trControl = ctrlDA)
+
+lrFit$finalModel
+
+})
+
+```
+
+#### Logistic Regression Model Accuracy = 72.07%, sensitivity 0.6739 specificity 0.7538
+
+```{r}
+
+lrPred <- predict(lrFit, newdata = testDA)
+lrCM <- confusionMatrix(lrPred, testDA$Sleep.Disorder.Binary)
+lrCM
+
+```
+
+```{r}
+# Plot the ROC curve for the hold-out set
+lrRoc <- roc(response = lrFit$pred$obs,
+             predictor = lrFit$pred$Yes,
+             levels = rev(levels(lrFit$pred$obs)))
+
+plot(lrRoc, legacy.axes = TRUE)
+
+```
+
+```{r}
+# The area under the curve: 0.869.
+lrRoc$auc
+
+```
+
+```{r}
+# Important variables
+lrImp <- varImp(lrFit, scale = FALSE)
+plot(lrImp)
+
+```
+
+```{r}
+# Store results for model comparison later
+testResults$lrFit <- predict(lrFit, testDA[,1:5, 7:14])
+
+```
+
+```{r}
+## Linear Discriminant Analysis Model
+suppressWarnings({
+
+set.seed(13)
+ldaFit <- train(trainDA[,1:5, 7:14], 
+               y = trainDA$Sleep.Disorder.Binary,
+                method = "lda",
+                preProc = c("center", "scale"),
+                metric = "ROC",
+                trControl = ctrlDA)
+
+ldaFit$finalModel
+
+})
+
+```
+
+#### Linear Discriminant Analysis Model Accuracy = 72.07% sensitivity 0.6739 specificity 0.7538
+
+```{r}
+
+suppressWarnings({
+
+ldaPred <- predict(ldaFit, newdata = testDA[,1:5, 7:14])
+ldaCM <- confusionMatrix(ldaPred, testDA$Sleep.Disorder.Binary)
+ldaCM
+
+})
+
+```
+
+```{r}
+# Plot the ROC curve for the hold-out set
+ldaRoc <- roc(response = ldaFit$pred$obs,
+              predictor = ldaFit$pred$Yes,
+              levels = rev(levels(ldaFit$pred$obs)))
+
+plot(ldaRoc, legacy.axes = TRUE)
+
+```
+
+```{r}
+# The area under the curve: 0.931
+ldaRoc$auc
+
+```
+
+```{r}
+# Important variables
+plot(varImp(ldaFit, scale = FALSE))
+
+```
+
+```{r}
+# Storing predictions in testResults for later
+testResults$LDA <- predict(ldaFit, testDA[,1:5, 7:14])
+
+```
+
+```{r}
+## Nearest Shrunken Centroids Model
+glmnGridDA <- expand.grid(alpha = c(0, .1, .2, .4, .6, .8, 1),
+                        lambda = seq(0.1, .2, length = 10))
+
+set.seed(13)
+glmnFitDA <- train(trainDA[,1:5, 7:14], 
+               y = trainDA$Sleep.Disorder.Binary,
+                 method = "glmnet",
+                 tuneGrid = glmnGridDA,
+                 preProc = c("center", "scale"),
+                 metric = "ROC",
+                 trControl = ctrlDA)
+
+glmnFitDA$results
+
+```
+
+#### Nearest Shrunken Centroids Model Accuracy: 67.57% sensitivity 0.5217 specificity 0.7846
+
+```{r}
+
+nscPred <- predict(glmnFit, newdata = testDA[,1:5, 7:14])
+nscCM <- confusionMatrix(nscPred, testDA$Sleep.Disorder.Binary)
+nscCM
+
+```
+
+```{r}
+# Plot  
+plot(glmnFitDA$finalModel, label = TRUE)
+coef(glmnFitDA$finalModel, s = 100)
+coef(glmnFitDA$finalModel, s = 0.001)
+glmnFitDA$finalModel$lambda
+glmnFitDA$finalModel$tuneValue
+glmnFitDA$finalModel$lambdaOpt
+coef(glmnFitDA$finalModel, s = glmnFitDA$finalModel$lambdaOpt)
+
+```
+
+```{r}
+## Plot the ROC curve for the hold-out set
+glmRocDA <- roc(response = glmnFitDA$pred$obs,
+              predictor = glmnFitDA$pred$Yes,
+              levels = rev(levels(glmnFitDA$pred$obs)))
+
+plot(glmRocDA, legacy.axes = TRUE) 
+
+```
+
+```{r}
+## The nearest shrunken centroids model's area under the curve: 0.941
+glmRocDA$auc
+
+```
+
+```{r}
+# Important variables
+plot(varImp(glmnFitDA, scale = FALSE))
+
+```
+
+```{r}
+## Store model predictions for later
+testResults$glmnetDA <- predict(glmnFitDA, testDA[,1:5, 7:14])
+testResults
+
+```
+
+### Results and Model Selection
+
+#### ROC Visuals
+
+```{r comparemodels2}
+
+### Compare Models using ROC curve
+
+plot(gbmRoc, type = "s", col = 'red', legacy.axes = TRUE)
+plot(glmRoc, type = "s", add = TRUE, col = 'green', legacy.axes = TRUE)
+plot(nnetRoc, type = "s", add = TRUE, col = 'blue', legacy.axes = TRUE)
+plot(glmRocDA, type = "s", add = TRUE, legacy.axes = TRUE)
+plot(bagROC, type = "s", add = TRUE, col = 'pink',legacy.axes = TRUE)
+plot(xgBoostROC, type = "s", add = TRUE, col = 'purple', legacy.axes = TRUE)
+plot(rfRoc, type = "s", add = TRUE, col = 'orange',legacy.axes = TRUE)
+legend("bottomright", legend = c("GradientBoosting", "PGLM", "NeuralNet", "LogReg", "ADABag", "XgBoost", "RF"),
+       col = c("red", "green","blue", "black", "pink", "purple", "orange"), lwd = 2)
+title(main = "Compare ROC curves from different models")
+```
+
+#### Compare Models using confusion matrix
+
+```{r}
+
+confusionMatrix(testResults$PGLM, testResults$obs, positive = "Yes")
+confusionMatrix(testResults$NNET, testResults$obs, positive = "Yes")
+confusionMatrix(testResults$gbm, testResults$obs, positive = "Yes")
+confusionMatrix(testResults$rf, testResults$obs, positive = "Yes")
+confusionMatrix(testResults$adaBAG, testResults$obs, positive = "Yes")
+confusionMatrix(testResults$xg, testResults$obs, positive = "Yes")
+confusionMatrix(testResults$lrFit, testResults$obs, positive = "Yes")
+confusionMatrix(testResults$LDA, testResults$obs, positive = "Yes")
+confusionMatrix(testResults$glmnetDA, testResults$obs, positive = "Yes")
+
+### Compare best models
+confusionMatrix(testResults$gbm, testResults$obs, positive = "Yes")
+confusionMatrix(testResults$rf, testResults$obs, positive = "Yes")
+confusionMatrix(testResults$adaBAG, testResults$obs, positive = "Yes")
+confusionMatrix(testResults$xg, testResults$obs, positive = "Yes")
+
+```
