@@ -69,6 +69,8 @@ The purpose of this project is to present the process used to determine the best
 
 ## Featured Notebooks/Analysis/Deliverables
 * [Presentation slides ]
+* https://github.com/VSbr22/ADS503-Group-Project/blob/09b218f51ba5a83a9a43b9c240969bb376c533bc/Techincal%20Presentation.pptx
+* 
 
 
 ## Data Pre-Processing
